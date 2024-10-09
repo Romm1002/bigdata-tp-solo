@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, count, sum, window, when, max, min
+from pyspark.sql.functions import col, window, max, min
 
 spark = SparkSession.builder \
     .appName("Analyse préliminaire des données sismiques") \
