@@ -1,48 +1,51 @@
 # -*- coding: utf-8 -*-
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, count, sum, lag, corr, avg
+from pyspark.sql.functions import col, count, sum, lag, corr, avg, lit, min, max, datediff, unix_timestamp
 from pyspark.sql.window import Window
 
-# Initialiser une session Spark
 spark = SparkSession.builder \
     .appName("Analyse des corrélations des événements sismiques") \
     .getOrCreate()
 
-# Charger les données nettoyées depuis HDFS
-df_cleaned = spark.read.csv("hdfs://namenode:9000/dataset_sismique_cleaned/part-00000-cfda7cb0-2a20-4895-b8c9-9897dad031ed-c000.csv", header=True, inferSchema=True)
+df_cleaned = spark.read.csv("hdfs://namenode:9000/dataset_sismique_cleaned/part-00000-65285987-7dc5-4062-8a48-eb2d74e6054f-c000.csv", header=True, inferSchema=True)
 
-# 1. Définir un seuil pour détecter les événements sismiques importants
-threshold_major_event = 5.0  # Seuil pour définir un séisme majeur
+correlation_analysis_magnitude = df_cleaned.stat.corr("tension entre plaque", "magnitude")
+print(f"Corrélation entre la tension entre plaque et les séismes : {correlation_analysis_magnitude}")
 
-# 2. Créer une fenêtre temporelle basée sur la date des événements
-# Cette fenêtre ne spécifie pas de frame, juste un ordre par la date
+threshold_major_event = 4.0  
+
+df_events = df_cleaned.filter(col("secousse") == True)
+
 window_spec = Window.orderBy("date")
 
-# 3. Utiliser la fonction lag() pour obtenir la magnitude de l'événement précédent
-df_cleaned = df_cleaned.withColumn("magnitude_previous", lag("magnitude", 1).over(window_spec))
-
-# 4. Filtrer pour récupérer uniquement les événements majeurs et leurs précédents
+df_cleaned = df_events.withColumns({"date_previous": lag("date", 1).over(window_spec), "magnitude_previous": lag("magnitude", 1).over(window_spec), "tension_previous": lag("tension entre plaque", 1).over(window_spec), })
 df_major_events = df_cleaned.filter(col("magnitude") >= threshold_major_event)
+df_major_events.show()
 
-
-# Calcul de la moyenne
 avg_magnitude_previous = df_major_events.select(avg("magnitude_previous").alias("avg_magnitude_previous")).collect()[0][0]
 
-# Calcul de la médiane (percentile à 50%)
 median_magnitude_previous = df_major_events.approxQuantile("magnitude_previous", [0.5], 0.001)[0]
 
-print(f"Moyenne de la magnitude des événements précédents et les séismes majeurs: {avg_magnitude_previous}")
-print(f"Médiane de la magnitude des événements précédents et les séismes majeurs: {median_magnitude_previous}")
+print(f"Moyenne de la magnitude des événements précédents un séisme majeur: {avg_magnitude_previous}")
+print(f"Médiane de la magnitude des événements précédents un séisme majeur: {median_magnitude_previous}")
 
-# 6. Visualiser les événements précédant les séismes majeurs et leurs magnitudes
-df_major_events.select("date", "magnitude", "magnitude_previous").show()
+correlation_analysis = df_cleaned.stat.corr("magnitude_previous", "magnitude")
+print(f"Corrélation entre la magnitude des événements précédents les séismes majeurs et la magnitude des séismes majeurs: {correlation_analysis}")
 
-# 7. Identifier des séquences de secousses avant les événements majeurs
-df_sequences = df_cleaned.filter(col("magnitude_previous").isNotNull()) \
-    .filter(col("magnitude_previous") < threshold_major_event)  # Filtrer les petits séismes avant des grands
 
-print("Séquences de petits séismes précédant des séismes majeurs:")
-df_sequences.show()
+df_date_diff = df_cleaned.withColumn(
+    "date_diff_seconds", 
+    (unix_timestamp("date") - unix_timestamp("date_previous")) / 60
+)
 
-# Stopper la session Spark
+df_date_diff.agg(
+    min("date_diff_seconds").alias("min_date_diff_minutes"),
+    max("date_diff_seconds").alias("max_date_diff_minutes")
+).show()
+avg_magnitude_previous = df_date_diff.select(avg("date_diff_seconds").alias("avg_date_diff_seconds")).collect()[0][0]
+
+median_magnitude_previous = df_date_diff.approxQuantile("date_diff_seconds", [0.5], 0.001)[0]
+
+print(f"Moyenne du temps entre l'événement précédent un séisme majeur et le séisme majeur: {avg_magnitude_previous}")
+print(f"Médiane du temps entre l'événement précédent un séisme majeur et le séisme majeur: {median_magnitude_previous}")
 spark.stop()
