@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, count, sum, lag, corr
+from pyspark.sql.functions import col, count, sum, lag, corr, avg
 from pyspark.sql.window import Window
 
 # Initialiser une session Spark
@@ -24,10 +24,15 @@ df_cleaned = df_cleaned.withColumn("magnitude_previous", lag("magnitude", 1).ove
 # 4. Filtrer pour récupérer uniquement les événements majeurs et leurs précédents
 df_major_events = df_cleaned.filter(col("magnitude") >= threshold_major_event)
 
-# 5. Calculer la corrélation entre la magnitude des événements précédents et celle des événements majeurs
-correlation_analysis = df_cleaned.stat.corr("magnitude_previous", "magnitude")
 
-print(f"Corrélation entre la magnitude des événements précédents et les séismes majeurs: {correlation_analysis}")
+# Calcul de la moyenne
+avg_magnitude_previous = df_major_events.select(avg("magnitude_previous").alias("avg_magnitude_previous")).collect()[0][0]
+
+# Calcul de la médiane (percentile à 50%)
+median_magnitude_previous = df_major_events.approxQuantile("magnitude_previous", [0.5], 0.001)[0]
+
+print(f"Moyenne de la magnitude des événements précédents et les séismes majeurs: {avg_magnitude_previous}")
+print(f"Médiane de la magnitude des événements précédents et les séismes majeurs: {median_magnitude_previous}")
 
 # 6. Visualiser les événements précédant les séismes majeurs et leurs magnitudes
 df_major_events.select("date", "magnitude", "magnitude_previous").show()
